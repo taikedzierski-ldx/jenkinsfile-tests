@@ -1,0 +1,3 @@
+node("_runner:linux") {
+    load "./loading_scope/main_shared_script.groovy"
+}
