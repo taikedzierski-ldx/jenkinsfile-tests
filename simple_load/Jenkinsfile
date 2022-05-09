@@ -1,3 +1,83 @@
+def checkout_repo(Map opts) {
+
+    def repo_url = opts.get("repo_url")
+    def branch_name = opts.get("branch_name")
+    def merge_with = opts.getOrDefault("merge_with", null)
+    def clone_submodules = opts.getOrDefault("submodules", false)
+    def pre_cleanup = opts.getOrDefault("pre_cleanup", false)
+
+    println "Checkout $repo_url/tree/$branch_name"
+
+    def scm_definition = [$class: 'GitSCM',
+        branches: [[name: "${branch_name}"]],
+        doGenerateSubmoduleConfigurations: false,
+        extensions: [
+            [$class: 'CloneOption',
+                noTags: false,
+                shallow: false,
+                timeout: 20
+            ],
+            [$class: 'CheckoutOption', timeout: 15],
+            [$class: 'UserIdentity', // For merge operation
+                name: 'ldx-opsbot',
+                email: 'ldx-opsbot@lumiradx.com'
+            ]
+        ],
+        submoduleCfg: [],
+        userRemoteConfigs: [[
+            credentialsId: 'github-ldx-opsbot-pat',
+            url: "${repo_url}"
+        ]]
+    ]
+    
+    //* Jenkins GitSCM always seems to shallow-clone to 10 commits only
+    // https://issues.jenkins.io/browse/JENKINS-45771
+    // However, this seems to now be resolved (JAN 2022). Leaving these comments for reference during testing
+
+    // Empty or unspecified merge target should not trigger a merge attempt
+    if( ! [null, ""].contains(merge_with)) {
+        println "Merging with: $merge_with"
+        scm_definition.extensions.push([$class: 'PreBuildMerge',
+            options: [
+                fastForwardMode: 'NO_FF',
+                mergeRemote: 'origin',
+                mergeTarget: "${merge_with}"
+            ]
+        ])
+    }
+    // */
+
+    if(clone_submodules) {
+        println "Cloning submodules: true"
+        // https://stackoverflow.com/a/42293620/2703818
+        scm_definition.extensions.push([$class: 'SubmoduleOption',
+            disableSubmodules: false,
+            parentCredentials: true,
+            recursiveSubmodules: true,
+            trackingSubmodules: false,
+            shallow: true,
+            depth: 1,
+            timeout: 20
+        ])
+    }
+
+    if(pre_cleanup) {
+        println "Performing prior cleanup:"
+        git_clean_repo os: "linux"
+    }
+
+    vars = checkout changelog: false,
+        poll: false,
+        scm: scm_definition
+    
+    env.GIT_COMMIT = vars.GIT_COMMIT
+    env.GIT_BRANCH = vars.GIT_BRANCH
+}
+
+
 node("_runner:linux") {
+    checkout_repo repo_url: "https://github.com/taikedzierski-ldx/jenkinsfile-tests.git",
+        branch_name: "master"
+
     load "./simple_load/upper.groovy"
 }
